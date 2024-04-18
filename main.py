@@ -1,10 +1,16 @@
+import redis #  redis-server
+import json
+
+
 
 # мгновенное значение, коррекция и установка времени, 30-минутные мощности, 3-х минутки?
 
 
+r = redis.Redis(host='localhost', port=6379, db=0)
 
 tBufUART: bytearray = [0] * 40
 int_buf: bytearray = [0] * 40
+
 
 def check_ressive_and(buff):
     #buff[6] == 0x80  # 0-отправка  80-получение
@@ -48,22 +54,40 @@ def check_ressive_and(buff):
 def check_Day_Data(buff):
     # buff [14-15, 20-21, 26-27, 32-33] (вроде как) в этих битах лежат данные А+ А- R+ R-
     # эти данные отдаем назад
+    i=0 #чтобы не выдавало ошибку пока функция пустая
 
 def check_Day_Increment(buff):
+    i=0
 
 def check_Month_Data(buff):
+    i=0
 
 def check_Month_Increment(buff):
+    i=0
 
 
 
 
+# Если в данных надо передать байт 0xC0, то применяется механизм байnстаффинга – байт 0xС0
+# заменяется последовательностью 0xDB, 0xDC.
+# Если в данных надо передать байт 0xDB, то он заменяется последовательностью 0xDB, 0xDD.
+def byte_stuffing(buffer):
+    stuffed_buffer = [buffer[0]]
+    for i in range(1, len(buffer)-1):
+        if buffer[i] == '0xc0':
+            stuffed_buffer.extend(['0xdb', '0xdc'])
+        elif buffer[i] == '0xdb':
+            stuffed_buffer.extend(['0xdb', '0xdd'])
+        else:
+            stuffed_buffer.append(buffer[i])
+    stuffed_buffer.append(buffer[-1])
+    return stuffed_buffer
 
 
 def int_to_hex(buff,size):
 
     for i in range(size):
-        tBufUART[i] = hex(int_buf[i])
+        tBufUART[i] = hex(buff[i])
 
 
 def ncp_getCRC(buff, size):
@@ -97,6 +121,7 @@ def cut_Buf(buff):  # обрезает нули в конце буфера
     for i in range(len(buff) - 1, -1, -1):
         if buff[i] == '0xc0':
             return buff[:i + 1]
+
     return buff
 
 def create_Packege(address,I1,I2,com):
@@ -122,7 +147,15 @@ def create_Packege(address,I1,I2,com):
     ncp_addCRC(int_buf, length)  # контрольная сумма пакета, 26-27 байты
     int_buf[length+2] = 0xc0 # завершающий бит
     int_to_hex(int_buf, len(int_buf)) # перевод всего буфера в hex формат
-    return cut_Buf(tBufUART)
+
+    stuffed_buffer = byte_stuffing(cut_Buf(tBufUART))
+
+    out =""
+    for i in range (len(cut_Buf(stuffed_buffer))):
+        out += stuffed_buffer[i]
+
+    #return cut_Buf(tBufUART)
+    return out
 
 def day_Data(buff,I1,I2):
     buff[10] = 0x01  # 1 команда (запрос Накопление энергии A+ на начало суток)
@@ -209,11 +242,16 @@ def charge(buff):
 
 if __name__ == "__main__":
 
-    # if len(sys.argv) < 2:
-    #     print("Usage: python program.py <input>")
-    #     sys.exit(1)
-    #
-    # input_param = sys.argv[1]
+
+
+    r.delete('address')
+
+    r.lpush('address','1')
+    r.lpush('address','12')
+    r.lpush('address','7')
+    r.lpush('address','15')
+
+    #print(r.lrange('address',0,-1))
 
     address = [0] * 4 # адрес (получаем на входе)
     address[0]=1
@@ -228,9 +266,48 @@ if __name__ == "__main__":
 
     com = 1 # номер команды (получаем на входе)
 
-    #print (get_Day_Increment(address,D1,D2))
-    #print (get_Month_Increment(address,M1,M2))
-    #print(f'{cut_Buf(get_Month_Increment(address,M1,M2))[24]:x}')
-    print(create_Packege(address,I1,I2,com))
 
 
+
+
+
+#-- создаем пример запроса
+json_create_cmd = {
+    "channel": 'ktp6',  # название канала
+    "cmd": 'day',  # название типа опроса day - показания на начало суток
+    "run": 'ce318',  # название вызываемого протокола
+    "vm_id": 4,  # id прибора учёта
+    "ph": 31,  # адрес под которым счетчик забит в успд
+    "trf": '4',  # количество тарифов у счётчика
+    "ki": 2,  # коэф тока
+    "ku": 3,  # коэф трансформации
+    "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
+    "cnt": 1,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
+    "overwrite": 0  # параметр дозаписи/перезаписи
+}
+
+json_string = json.dumps(json_create_cmd)
+
+r.rpush(f'channel.commands', json_string) # добавляем его на редис
+#---
+
+json_output = {"key": "{answer}", "vmid": 4, "command": "day", "do": "send", "out":create_Packege(address,I1,I2,1)
+,"protocol": "1", "waitingbytes": 22} # генерируем json с запросом и указываем ключ куда положить ответ
+
+json_string = json.dumps(json_output)
+r.rpush('output',json_string) #  добавляем его на редис
+
+#--- создаем пример ответа
+json_answer = {"in": "3E032A00A1413000B82F0100113442005FB300005E5C", "state": "0"}
+json_string = json.dumps(json_answer)
+r.rpush('answer',json_string)
+#---
+
+# c переодичностью в секунду проверяем:
+json_answer = r.lpop('answer') # там лежит строка
+
+
+
+
+#print(json_answer)
+print(r.lpop('output'))
