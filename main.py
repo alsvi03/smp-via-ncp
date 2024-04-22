@@ -7,8 +7,6 @@ import uuid
 #lrange channel.commands 0 -1
 
 random_uuid = uuid.uuid4() # рандомная генерация ключа
-#print(random_uuid)
-
 
 # мгновенное значение, коррекция и установка времени, 30-минутные мощности, 3-х минутки?
 
@@ -18,10 +16,18 @@ r = redis.Redis(host='localhost', port=6379, db=0)
 tBufUART: bytearray = [0] * 40
 int_buf: bytearray = [0] * 40
 
+def process_string(input_string):
+    buffer = []
+    for i in range(0, len(input_string), 2):
+        if i+1 < len(input_string):
+            two_chars = input_string[i:i+2]
+            num = int(two_chars, 16)
+            buffer.append(num)
+    return buffer
 
 def check_ressive_and(answer):
 
-    buff = 0
+    buff = process_string(answer)
 
     #buff[6] == 0x80  # 0-отправка  80-получение
     crc = (buff[len(buff)-2] << 8) | buff[len(buff)-1]
@@ -94,7 +100,7 @@ def byte_stuffing(buffer):
     return stuffed_buffer
 
 
-def int_to_hex(buff,size,address): # c0060000002770006020001000001020000010300000104000001b9a8c0
+def int_to_hex(buff,size,address): # c00677020000000602000100000102000001030000010400000121aac0
     for i in range(size):
             hexval = hex(buff[i])
             hexstr = hexval[2:]
@@ -103,14 +109,20 @@ def int_to_hex(buff,size,address): # c006000000277000602000100000102000001030000
             else:
                 tBufUART[i] = hexstr
 
+
+
+    #print(tBufUART)
+
+def add_address():
     # добавляем адрес в нужном формате
     hex_address = hex(address)[2:]
     if len(str(abs(address))) == 2:
-        tBufUART[2] = hex_address
+        int_buf[2] = int(hex_address,16)
+    elif len(str(abs(address))) == 3:
 
-    elif len(str(abs(address))) > 2 and  len(str(abs(address)))  < 4:
-        tBufUART[2] = str(hex_address)[1:]
-        tBufUART[3] = str(hex_address)[:1]
+
+        int_buf[2] = int(str(hex_address)[1:],16)
+        int_buf[3] = int("0" + str(hex_address)[:1],16)
 
 
 # def int_to_hex(buff, size,address):
@@ -128,7 +140,7 @@ def ncp_getCRC(buff, size): # подсчет контрольной суммы
     pcBlock = buff
 
 
-    for i in range(size):
+    for i in range(1,size):
         crc ^= pcBlock[i] << 8
         for j in range(8):
             if crc & 0x8000:
@@ -160,6 +172,7 @@ def create_Packege(address,I1,I2,com):
     int_buf[0] = 0xc0
     int_buf[1] = 0x06
     #[2-5] - адрес
+    add_address()
     int_buf[6] = 0x00  # 0-отправка  1-получение
     int_buf[7] = 0x06  # 6-Данные для устройства 7- ошибка
     int_buf[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
@@ -188,9 +201,13 @@ def create_Packege(address,I1,I2,com):
 
     return out
 
+
+
+
+
 def day_Data(buff,I1,I2):
     buff[10] = 0x01  # 1 команда (запрос Накопление энергии A+ на начало суток)
-    buff[11] = 0x00  # Маска, общая энергия
+    buff[11] = 0x00  # Маска, общая энергия (тариф?)
     buff[12] = I1  # номер более поздних суток
     buff[13] = I2  # номер более ранних суток
     buff[14] = 0x02  # 2 команда (запрос Накопление энергии A- на начало суток)
@@ -285,7 +302,7 @@ json_create_cmd = {
     "ki": 2,  # коэф тока
     "ku": 3,  # коэф трансформации
     "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
-    "cnt": 1,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
+    "cnt": 0,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
     "overwrite": 0  # параметр дозаписи/перезаписи
 }
 
@@ -312,7 +329,7 @@ json_string = json.dumps(json_output)
 r.rpush('output',json_string) #  добавляем его на редис
 
 #--- создаем пример ответа
-json_answer = {"in": "3E032A00A1413000B82F0100113442005FB300005E5C", "state": "0"}
+json_answer = {"in": "C006770200008006020001A0F5940302100398CEA70204B0050CE0C0", "state": "0"}
 json_string = json.dumps(json_answer)
 r.rpush(answer_key,json_string)
 #---
@@ -326,7 +343,6 @@ json_answer = r.lpop(answer_key) # там лежит строка
 
 print(r.lpop('output'))
 print(json.loads(json_answer)["in"])
-
 
 
 
