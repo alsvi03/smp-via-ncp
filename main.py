@@ -1,6 +1,7 @@
 import redis #  redis-server
 import json
 import uuid
+import datetime
 
 #redis-cli
 #keys *
@@ -9,77 +10,58 @@ import uuid
 random_uuid = uuid.uuid4() # рандомная генерация ключа
 
 # мгновенное значение, коррекция и установка времени, 30-минутные мощности, 3-х минутки?
-
+# dff
 
 r = redis.Redis(host='localhost', port=6379, db=0)
 
 tBufUART: bytearray = [0] * 40
 int_buf: bytearray = [0] * 40
 
-def process_string(input_string):
+def process_string(input_string):  #приведение ответа к формату буфера
     buffer = []
     for i in range(0, len(input_string), 2):
         if i+1 < len(input_string):
             two_chars = input_string[i:i+2]
-            num = int(two_chars, 16)
+            num = two_chars
             buffer.append(num)
+
     return buffer
 
-def check_ressive_and(answer):
+def hex_to_int(buff):
+    int_buf = [0]*len(buff)
+    for i in range(len(buff)):
+        int_buf[i]=int(buff[i],16)
+    return int_buf
 
-    buff = process_string(answer)
+def DecodeDFF(recBuf, shiftInBits): #перевод из dff в int
+    i = 0
+    result = 0
 
-    #buff[6] == 0x80  # 0-отправка  80-получение
-    crc = (buff[len(buff)-2] << 8) | buff[len(buff)-1]
-    if ncp_getCRC(buff,len(buff)) == crc: # проверка целостности пакета
-        if buff[7] == 0x07: # обработка ошибки (вместо print должно куда-то возвращаться)
-            if buff[8]== 1:
-                print ("Ошибка. Используется если в кодах нет адекватной по смыслу ошибки.")
-            elif buff[8] == 2:
-                print ("Ошибка параметров")
-            elif buff[8] == 3:
-                print ("Неизвестный/неподдерживаемый код")
-            elif buff[8] == 4:
-                print ("Ошибка записи")
-            elif buff[8] == 5:
-                print (" Недостаточно памяти")
-            elif buff[8] == 6:
-                print ("Неверный адрес")
-            elif buff[8] == 7:
-                print ("Некоректные данные в команде")
-            elif buff[8] == 8:
-                print ("Выполняется другая команда или устройство занято")
-            elif buff[8] == 9:
-                print ("Нет связи")
-        elif buff[7] == 0x06:
-            if buff[10] == 0x01 : # 1 команда (запрос Накопление энергии A+ на начало суток)
-                check_Day_Data(buff)
-            elif buff[10] == 0x05: # 5 команда (запрос Накопление энергии A+ за сутки)
-                check_Day_Increment(buff)
-            elif buff[10] == 0x09: # 9 команда (запрос Накопление энергии A+ на начало расчетного периода(месяца))
-                check_Month_Data(buff)
-            elif buff[10] == 0x0d:  # 13 команда (запрос Накопление энергии A+ за расчетный период (месяц))
-                check_Month_Increment(buff)
+    while True:
+        tmpBuf = recBuf[i] & 0x7F
+        tmpRes = tmpBuf << (i * 7)
+        result += tmpRes
 
+        if (recBuf[i] & 0x80) > 0:
+            i += 1
+        else:
+            break
+    result = result >> shiftInBits
+
+    return result, i + 1
+
+
+
+
+
+def ncp_checkCRC(buff, size):
+    crc = ncp_getCRC(buff, size-3)
+
+    if (crc >> 8) & 0xff == (buff[size-3] ) and (crc & 0xff) == (buff[size-2]):
+        return True
     else:
-        print("Контрольная сумма пакета не совпадает")
+        return False
 
-
-
-
-def check_Day_Data(buff):
-    # buff [14-15, 20-21, 26-27, 32-33] (вроде как) в этих битах лежат данные А+ А- R+ R-
-    # эти данные отдаем назад
-    i=0 #чтобы не выдавало ошибку пока функция пустая
-
-def check_Day_Increment(buff):
-    i=0
-
-def check_Month_Data(buff):
-    i=0
-
-def check_Month_Increment(buff):
-    i=0
 
 
 
@@ -100,6 +82,28 @@ def byte_stuffing(buffer):
     return stuffed_buffer
 
 
+def byte_destuffing(stuffed_buffer):
+    destuffed_buffer = [stuffed_buffer[0]]
+    i = 1
+    while i < len(stuffed_buffer) - 1:
+        if stuffed_buffer[i] == 'DB':
+            if stuffed_buffer[i + 1] == 'DC':
+                destuffed_buffer.append('C0')
+                i += 2
+            elif stuffed_buffer[i + 1] == 'DD':
+                destuffed_buffer.append('DB')
+                i += 2
+            else:
+                destuffed_buffer.append(stuffed_buffer[i])
+                i += 1
+        else:
+            destuffed_buffer.append(stuffed_buffer[i])
+            i += 1
+    destuffed_buffer.append(stuffed_buffer[-1])
+    return destuffed_buffer
+
+
+
 def int_to_hex(buff,size,address): # c00677020000000602000100000102000001030000010400000121aac0
     for i in range(size):
             hexval = hex(buff[i])
@@ -111,10 +115,8 @@ def int_to_hex(buff,size,address): # c006770200000006020001000001020000010300000
 
 
 
-    #print(tBufUART)
 
-def add_address():
-    # добавляем адрес в нужном формате
+def add_address():     # добавляем адрес в нужном формате
     hex_address = hex(address)[2:]
     if len(str(abs(address))) == 2:
         int_buf[2] = int(hex_address,16)
@@ -169,11 +171,12 @@ def cut_Buf(buff):  # обрезает нули в конце буфера
     return buff
 
 def create_Packege(address,I1,I2,com):
+    # C0 06 77 02 00 00 80 06 02 00      01  A0 F5 94 03   02  10    03   98 CE A7 02   04   B0 05         0C E0 C0
+
     int_buf[0] = 0xc0
     int_buf[1] = 0x06
-    #[2-5] - адрес
-    add_address()
-    int_buf[6] = 0x00  # 0-отправка  1-получение
+    add_address()     #[2-5] - адрес
+    int_buf[6] = 0x00  # 0-отправка  80-получение
     int_buf[7] = 0x06  # 6-Данные для устройства 7- ошибка
     int_buf[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
     int_buf[9] = 0x00  # подкоманда
@@ -287,6 +290,94 @@ def charge(buff):
     return 11
 
 
+def check_ressive_and(answer):
+
+
+
+
+    buff = hex_to_int(byte_destuffing(process_string(answer)))
+
+    if ncp_checkCRC(buff,len(buff)): # проверка целостности пакета
+        if buff[7] == 0x07: # обработка ошибки (вместо print должно куда-то возвращаться)
+            if buff[8]== 1:
+                print ("Ошибка. Используется если в кодах нет адекватной по смыслу ошибки.")
+            elif buff[8] == 2:
+                print ("Ошибка параметров")
+            elif buff[8] == 3:
+                print ("Неизвестный/неподдерживаемый код")
+            elif buff[8] == 4:
+                print ("Ошибка записи")
+            elif buff[8] == 5:
+                print (" Недостаточно памяти")
+            elif buff[8] == 6:
+                print ("Неверный адрес")
+            elif buff[8] == 7:
+                print ("Некоректные данные в команде")
+            elif buff[8] == 8:
+                print ("Выполняется другая команда или устройство занято")
+            elif buff[8] == 9:
+                print ("Нет связи")
+        elif buff[7] == 0x06:
+            if buff[10] == 0x01 : # 1 команда (запрос Накопление энергии A+ на начало суток)
+                check_Day_Data(buff)
+                json_data = {"ep": check_Day_Data(buff)[0],
+                             "em": check_Day_Data(buff)[1],
+                             "rp": check_Day_Data(buff)[2],
+                             "rm": check_Day_Data(buff)[3],
+                             "tarif": 0,
+                             "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                             "time":  datetime.datetime.now().strftime("%H:%M:%S"),
+                             "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                             "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
+
+
+
+            # elif buff[10] == 0x05: # 5 команда (запрос Накопление энергии A+ за сутки)
+            #     check_Day_Increment(buff)
+            # elif buff[10] == 0x09: # 9 команда (запрос Накопление энергии A+ на начало расчетного периода(месяца))
+            #     check_Month_Data(buff)
+            # elif buff[10] == 0x0d:  # 13 команда (запрос Накопление энергии A+ за расчетный период (месяц))
+            #     check_Month_Increment(buff)
+
+    else:
+        print("Контрольная сумма пакета не совпадает")
+
+    return json_data
+
+
+
+
+def check_Day_Data(buff):
+    ep = DecodeDFF(buff[11:25],3)[0]
+    i = DecodeDFF(buff[11:25], 3)[1] + 1
+    em = DecodeDFF(buff[11+i:25],3)[0]
+    i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
+    rp = DecodeDFF(buff[11 + i:25], 3)[0]
+    i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
+    rm = DecodeDFF(buff[11 + i:25], 3)[0]
+
+    # print(DecodeDFF(buff[11:25],3)[0])
+    # i = DecodeDFF(buff[11:25],3)[1]+1
+    # print(DecodeDFF(buff[11+i:25],3)[0])
+    # i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
+    # print(DecodeDFF(buff[11 + i:25], 3)[0])
+    # i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
+    # print(DecodeDFF(buff[11 + i:25], 3)[0])
+
+    return ep,em,rp,rm
+
+
+
+def check_Day_Increment(buff):
+    i=0
+
+def check_Month_Data(buff):
+    i=0
+
+def check_Month_Increment(buff):
+    i=0
+
+
 
 
 
@@ -297,12 +388,12 @@ json_create_cmd = {
     "cmd": 'day',  # название типа опроса day - показания на начало суток
     "run": 'ce318',  # название вызываемого протокола
     "vm_id": 4,  # id прибора учёта
-    "ph": 631,  # адрес под которым счетчик забит в успд
+    "ph": 999,  # адрес под которым счетчик забит в успд
     "trf": '4',  # количество тарифов у счётчика
     "ki": 2,  # коэф тока
     "ku": 3,  # коэф трансформации
-    "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
-    "cnt": 0,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
+    "ago": 1,  # начало опроса 0 - текущий день 1 вчерашний и тд
+    "cnt": 1,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
     "overwrite": 0  # параметр дозаписи/перезаписи
 }
 
@@ -328,7 +419,7 @@ json_output = {"key": answer_key, "vmid": 4, "command": "day", "do": "send", "ou
 json_string = json.dumps(json_output)
 r.rpush('output',json_string) #  добавляем его на редис
 
-#--- создаем пример ответа
+#--- создаем пример ответа  #C006770200008006020001A0F5940302100398CEA70204B0050CE0C0
 json_answer = {"in": "C006770200008006020001A0F5940302100398CEA70204B0050CE0C0", "state": "0"}
 json_string = json.dumps(json_answer)
 r.rpush(answer_key,json_string)
@@ -337,12 +428,31 @@ r.rpush(answer_key,json_string)
 # c переодичностью в секунду проверяем:
 json_answer = r.lpop(answer_key) # там лежит строка
 
-#check_ressive_and(json.loads(json_answer)["in"])
+json_data = check_ressive_and(json.loads(json_answer)["in"])
+json_string = json.dumps(json_data)
+r.rpush('data',json_string)
+
+
+
 
 
 
 print(r.lpop('output'))
-print(json.loads(json_answer)["in"])
+print(r.lpop('data'))
+
+
+
+#98 CE A7 02
+prim = [0] * 40
+prim[0] = 0x10
+prim[1] = 0
+prim[2] = 0
+prim[3] = 0
+
+
+#print(DecodeDFF(prim,3))
+#print(process_string('c006e703000000060200010001010200010103000101040001018e09c0'))
+
 
 
 
