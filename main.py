@@ -1,7 +1,8 @@
-import redis #  redis-server
+import redis
 import json
 import uuid
 import datetime
+import time
 
 #redis-cli
 #keys *
@@ -9,15 +10,26 @@ import datetime
 
 random_uuid = uuid.uuid4() # рандомная генерация ключа
 
-# мгновенное значение, коррекция и установка времени, 30-минутные мощности, 3-х минутки?
-# dff
+#30-минутные мощности, по фазам('instant')
+# тариф в выводе
+
+
+# коррекция и установка времени
+# dff зашифровка
+
+
 
 r = redis.Redis(host='localhost', port=6379, db=0)
+r.delete(f'output')
+r.delete(f'data')
+r.delete(f'channel.commands')
+
+
 
 tBufUART: bytearray = [0] * 40
 int_buf: bytearray = [0] * 40
 
-def process_string(input_string):  #приведение ответа к формату буфера
+def process_string(input_string):  # приведение ответа к формату буфера
     buffer = []
     for i in range(0, len(input_string), 2):
         if i+1 < len(input_string):
@@ -170,32 +182,34 @@ def cut_Buf(buff):  # обрезает нули в конце буфера
 
     return buff
 
-def create_Packege(address,I1,I2,com):
-    # C0 06 77 02 00 00 80 06 02 00      01  A0 F5 94 03   02  10    03   98 CE A7 02   04   B0 05         0C E0 C0
+def create_Packege(address,I1,I2,com,trf):
 
-    int_buf[0] = 0xc0
+    int_buf[0] = 0xc0 # начальный байт
     int_buf[1] = 0x06
     add_address()     #[2-5] - адрес
     int_buf[6] = 0x00  # 0-отправка  80-получение
     int_buf[7] = 0x06  # 6-Данные для устройства 7- ошибка
-    int_buf[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
-    int_buf[9] = 0x00  # подкоманда
-
     if com == 'day': # формирование данных команды
-        length = day_Data(int_buf,I1,I2) # length - костыль чтобы потом знать в какие индексы записывать дальнейшие биты
-    elif com == 2:
-        length = day_Increment(int_buf,I1,I2)
-    elif com == 3:
-        length = month_Data(int_buf,I1,I2)
-    elif com == 4:
-        length = month_Increment(int_buf,I1,I2)
-    elif com == 5:
-        length = charge(address)
+        length = day_Data(int_buf,I1,I2,trf) # length - костыль чтобы потом знать в какие индексы записывать дальнейшие биты
+    elif com == 'incday':
+        length = day_Increment(int_buf,I1,I2,trf)
+    elif com == 'month':
+        length = month_Data(int_buf,I1,I2,trf)
+    elif com == 'incmonth':
+        length = month_Increment(int_buf,I1,I2,trf)
+    elif com == 'allen':
+        length = allen(int_buf,trf)
+    elif com == 'min3':
+        length = min3(int_buf)
+    elif com == 'min30':
+        length = min30(int_buf)
+    elif com == 'instant':
+        length = instant(int_buf)
 
     ncp_addCRC(int_buf, length)  # контрольная сумма пакета, 26-27 байты
-    int_buf[length+2] = 0xc0 # завершающий бит
+    int_buf[length+2] = 0xc0 # завершающий байт
     int_to_hex(int_buf, len(int_buf),address) # перевод всего буфера в hex формат
-    stuffed_buffer = byte_stuffing(cut_Buf(tBufUART))
+    stuffed_buffer = byte_stuffing(cut_Buf(tBufUART)) # байт стаффинг
 
     out =""
     for i in range (len(stuffed_buffer)):
@@ -208,174 +222,231 @@ def create_Packege(address,I1,I2,com):
 
 
 
-def day_Data(buff,I1,I2):
+def day_Data(buff,I1,I2,trf):
+    buff[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
     buff[10] = 0x01  # 1 команда (запрос Накопление энергии A+ на начало суток)
-    buff[11] = 0x00  # Маска, общая энергия (тариф?)
+    buff[11] = trf  # Маска, общая энергия (тариф?) 0 - общая 1 - суммарная 2 - первый тариф 3 - второй и тд
     buff[12] = I1  # номер более поздних суток
     buff[13] = I2  # номер более ранних суток
     buff[14] = 0x02  # 2 команда (запрос Накопление энергии A- на начало суток)
-    buff[15] = 0x00  # Маска, общая энергия
+    buff[15] = trf  # Маска, общая энергия
     buff[16] = I1  # номер более поздних суток
     buff[17] = I2  # номер более ранних суток
     buff[18] = 0x03  # 3 команда (запрос Накопление энергии R+ на начало суток)
-    buff[19] = 0x00  # Маска, общая энергия
+    buff[19] = trf  # Маска, общая энергия
     buff[20] = I1  # номер более поздних суток
     buff[21] = I2  # номер более ранних суток
     buff[22] = 0x04  # 4 команда (запрос Накопление энергии R- на начало суток)
-    buff[23] = 0x00  # Маска, общая энергия
+    buff[23] = trf  # Маска, общая энергия
     buff[24] = I1  # номер более поздних суток
     buff[25] = I2  # номер более ранних суток
     return 26
 
-def day_Increment(buff,I1,I2):
+def day_Increment(buff,I1,I2,trf):
+    buff[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
     buff[10] = 0x05  # 5 команда (запрос Накопление энергии A+ за сутки)
-    buff[11] = 0x00  # Маска, общая энергия
+    buff[11] = trf  # Маска, общая энергия
     buff[12] = I1  # номер более поздних суток
     buff[13] = I2  # номер более ранних суток
     buff[14] = 0x06  # 6 команда (запрос Накопление энергии A- за сутки)
-    buff[15] = 0x00  # Маска, общая энергия
+    buff[15] = trf  # Маска, общая энергия
     buff[16] = I1  # номер более поздних суток
     buff[17] = I2  # номер более ранних суток
     buff[18] = 0x07  # 7 команда (запрос Накопление энергии R+ за сутки)
-    buff[19] = 0x00  # Маска, общая энергия
+    buff[19] = trf  # Маска, общая энергия
     buff[20] = I1  # номер более поздних суток
     buff[21] = I2  # номер более ранних суток
     buff[22] = 0x08  # 8 команда (запрос Накопление энергии R- за сутки)
-    buff[23] = 0x00  # Маска, общая энергия
+    buff[23] = trf  # Маска, общая энергия
     buff[24] = I1  # номер более поздних суток
     buff[25] = I2  # номер более ранних суток
     return 26
 
     
-def month_Data(buff,I1,I2):
+def month_Data(buff,I1,I2,trf):
+    buff[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
     buff[10] = 0x09  # 9 команда (запрос Накопление энергии A+ на начало расчетного периода(месяца))
-    buff[11] = 0x00  # Маска, общая энергия
+    buff[11] = trf  # Маска, общая энергия
     buff[12] = I1  # номер более позднего месяца
     buff[13] = I2  # номер более раннего месяца
     buff[14] = 0x0A  # 10 команда (запрос Накопление энергии A- на начало расчетного периода(месяца))
-    buff[15] = 0x00  # Маска, общая энергия
+    buff[15] = trf  # Маска, общая энергия
     buff[16] = I1  # номер более позднего месяца
     buff[17] = I2  # номер более раннего месяца
     buff[18] = 0x0B  # 11 команда (запрос Накопление энергии R+ на начало расчетного периода(месяца))
-    buff[19] = 0x00  # Маска, общая энергия
+    buff[19] = trf  # Маска, общая энергия
     buff[20] = I1  # номер более позднего месяца
     buff[21] = I2  # номер более раннего месяца
     buff[22] = 0x0C  # 12 команда (запрос Накопление энергии R- на начало расчетного периода(месяца))
-    buff[23] = 0x00  # Маска, общая энергия
+    buff[23] = trf  # Маска, общая энергия
     buff[24] = I1  # номер более позднего месяца
     buff[25] = I2  # номер более раннего месяца
     return 26
     
-def month_Increment(buff,I1,I2):
+def month_Increment(buff,I1,I2,trf):
+    buff[8] = 0x02  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
     buff[10] = 0x0d  # 13 команда (запрос Накопление энергии A+ за расчетный период (месяц))
-    buff[11] = 0x00  # Маска, общая энергия
+    buff[11] = trf  # Маска, общая энергия
     buff[12] = I1  # номер более позднего месяца
     buff[13] = I2  # номер более раннего месяца
     buff[14] = 0x0e  # 14 команда (запрос Накопление энергии A- за расчетный период (месяц))
-    buff[15] = 0x00  # Маска, общая энергия
+    buff[15] = trf  # Маска, общая энергия
     buff[16] = I1  # номер более позднего месяца
     buff[17] = I2  # номер более раннего месяца
     buff[18] = 0x0f  # 15 команда (запрос Накопление энергии R+ за расчетный период (месяц))
-    buff[19] = 0x00  # Маска, общая энергия
+    buff[19] = trf  # Маска, общая энергия
     buff[20] = I1  # номер более позднего месяца
     buff[21] = I2  # номер более раннего месяца
     buff[22] = 0x10  # 16 команда (запрос Накопление энергии R- за расчетный период (месяц))
-    buff[23] = 0x00  # Маска, общая энергия
+    buff[23] = trf  # Маска, общая энергия
     buff[24] = I1  # номер более позднего месяца
     buff[25] = I2  # номер более раннего месяца
     return 26
 
-def charge(buff):
-    int_buf[10] = 0x20  # 32 команда (запрос заряда батареи)
-    return 11
+
+
+def allen(buff,trf): #
+    buff[8] = 0x01  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
+    buff[10] = 0x01  # текущее накопление энергии A+
+    buff[11] = trf  # Маска, общая энергия
+    buff[12] = 0x02  # текущее накопление энергии A-
+    buff[13] = trf  # Маска, общая энергия
+    buff[14] = 0x03  # текущее накопление энергии R+
+    buff[15] = trf  # Маска, общая энергия
+    buff[16] = 0x04  # текущее накопление энергии R-
+    buff[17] = trf  # Маска, общая энергия
+
+    return 18
+
+
+
+
+def min3(buff):
+    #C0 06 77 02 00 00 80 06 01 00   0E 21 00 03 00 03 00 03   10 05 00 03 00 03 00 03    70 D7 C0
+    #C0 06 77 02 00 00 80 06 01 00   0E 16   00 03   10 06   00 03                            B2 AC C0
+    buff[8] = 0x01  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
+    buff[10] = 0x0e  # текущая мощность A+
+    buff[11] = 0x0f  # текущая мощность A-
+    buff[12] = 0x10  # текущая мощность R+
+    buff[13] = 0x11  # текущая мощность R-
+    return 14
+
+def min30(buff):
+    buff[8] = 0x0a  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+    buff[9] = 0x00  # подкоманда
+    buff[10] = 0x12  #  A+
+    buff[11] = 0x13  #  A-
+    buff[12] = 0x14  #  R+
+    buff[13] = 0x15  #  R-
+
+    return 14
+
+def instant (buff): #
+    buff[8] = 0x0a  # номер команды 0a - DATA_SINGLE_EX
+    buff[9] = 0x00  # подкоманда
+    buff[10] = 0x0d
+    buff[11] = 0x1e
+    buff[12] = 0x0e
+    buff[13] = 0x1e
+    buff[14] = 0x10
+    buff[15] = 0x1e
+    buff[16] = 0x16
+    buff[17] = 0x1c
+    buff[18] = 0x18
+    buff[19] = 0x1c
+    buff[20] = 0x19
+    buff[21] = 0x1c
+    buff[22] = 0x1a
+    buff[23] = 0x1c
+    buff[24] = 0x52
+    buff[25] = 0x1c
+    buff[26] = 0x53
+    buff[27] = 0x1c
+    buff[28] = 0x54
+    buff[29] = 0x1c
+    return 30
+
+
 
 
 def check_ressive_and(answer):
-
-
-
-
-    buff = hex_to_int(byte_destuffing(process_string(answer)))
-
+    buff = hex_to_int(byte_destuffing(process_string(answer))) # обратный байт стаффинг и приведение к int
     if ncp_checkCRC(buff,len(buff)): # проверка целостности пакета
-        if buff[7] == 0x07: # обработка ошибки (вместо print должно куда-то возвращаться)
+        if buff[7] == 0x07: # обработка ошибки
             if buff[8]== 1:
-                print ("Ошибка. Используется если в кодах нет адекватной по смыслу ошибки.")
+                json_data = {"error":"Error. Used if the codes do not contain an error that is adequate in meaning."}
             elif buff[8] == 2:
-                print ("Ошибка параметров")
+                json_data = {"error":"Parameter error"}
             elif buff[8] == 3:
-                print ("Неизвестный/неподдерживаемый код")
+                json_data = {"error":"Unknown/unsupported code"}
             elif buff[8] == 4:
-                print ("Ошибка записи")
+                json_data = {"error": "Write error"}
             elif buff[8] == 5:
-                print (" Недостаточно памяти")
+                json_data = {"error": "Not enough memory"}
             elif buff[8] == 6:
-                print ("Неверный адрес")
+                json_data = {"error": "Wrong address"}
             elif buff[8] == 7:
-                print ("Некоректные данные в команде")
+                json_data = {"error": "Incorrect data in the command"}
             elif buff[8] == 8:
-                print ("Выполняется другая команда или устройство занято")
+                json_data = {"error": "Another command is in progress or the device is busy"}
             elif buff[8] == 9:
-                print ("Нет связи")
+                json_data = {"error": "No connection"}
         elif buff[7] == 0x06:
-            if buff[10] == 0x01 : # 1 команда (запрос Накопление энергии A+ на начало суток)
-                check_Day_Data(buff)
-                json_data = {"ep": check_Day_Data(buff)[0],
-                             "em": check_Day_Data(buff)[1],
-                             "rp": check_Day_Data(buff)[2],
-                             "rm": check_Day_Data(buff)[3],
+            if buff[8] == 0x02: #(01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+                # запись данных в json
+                json_data = {"ep": check_Data(buff,3)[0],
+                             "em": check_Data(buff,3)[1],
+                             "rp": check_Data(buff,3)[2],
+                             "rm": check_Data(buff,3)[3],
                              "tarif": 0,
                              "date": datetime.datetime.now().strftime("%d-%m-%Y"),
                              "time":  datetime.datetime.now().strftime("%H:%M:%S"),
                              "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
                              "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
+            elif buff[8] == 0x01:
+                json_data = {"ep": check_Data(buff,0)[0],
+                             "em": check_Data(buff,0)[1],
+                             "rp": check_Data(buff,0)[2],
+                             "rm": check_Data(buff,0)[3],
+                             "tarif": 0,
+                             "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                             "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                             "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                             "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
 
 
 
-            # elif buff[10] == 0x05: # 5 команда (запрос Накопление энергии A+ за сутки)
-            #     check_Day_Increment(buff)
-            # elif buff[10] == 0x09: # 9 команда (запрос Накопление энергии A+ на начало расчетного периода(месяца))
-            #     check_Month_Data(buff)
-            # elif buff[10] == 0x0d:  # 13 команда (запрос Накопление энергии A+ за расчетный период (месяц))
-            #     check_Month_Increment(buff)
+
+
 
     else:
-        print("Контрольная сумма пакета не совпадает")
+        json_data = {"error": 'Packet checksum does not match'}
 
     return json_data
 
 
 
 
-def check_Day_Data(buff):
-    ep = DecodeDFF(buff[11:25],3)[0]
-    i = DecodeDFF(buff[11:25], 3)[1] + 1
-    em = DecodeDFF(buff[11+i:25],3)[0]
-    i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
-    rp = DecodeDFF(buff[11 + i:25], 3)[0]
-    i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
-    rm = DecodeDFF(buff[11 + i:25], 3)[0]
-
-    # print(DecodeDFF(buff[11:25],3)[0])
-    # i = DecodeDFF(buff[11:25],3)[1]+1
-    # print(DecodeDFF(buff[11+i:25],3)[0])
-    # i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
-    # print(DecodeDFF(buff[11 + i:25], 3)[0])
-    # i = DecodeDFF(buff[11+i:25], 3)[1] + 1+i
-    # print(DecodeDFF(buff[11 + i:25], 3)[0])
+def check_Data(buff,shiftBits):
+    ep = DecodeDFF(buff[11:40],shiftBits)[0] # A+
+    i = DecodeDFF(buff[11:40], shiftBits)[1] + 1
+    em = DecodeDFF(buff[11+i:40],shiftBits)[0] # A-
+    i = DecodeDFF(buff[11+i:40], shiftBits)[1] + 1+i
+    rp = DecodeDFF(buff[11 + i:40], shiftBits)[0] # R+
+    i = DecodeDFF(buff[11+i:40], shiftBits)[1] + 1+i
+    rm = DecodeDFF(buff[11 + i:40], shiftBits)[0] # R-
 
     return ep,em,rp,rm
 
 
 
-def check_Day_Increment(buff):
-    i=0
 
-def check_Month_Data(buff):
-    i=0
-
-def check_Month_Increment(buff):
-    i=0
 
 
 
@@ -385,74 +456,82 @@ def check_Month_Increment(buff):
 #-- создаем пример запроса
 json_create_cmd = {
     "channel": 'ktp6',  # название канала
-    "cmd": 'day',  # название типа опроса day - показания на начало суток
+    "cmd": 'min3',  # название типа опроса day - показания на начало суток
     "run": 'ce318',  # название вызываемого протокола
     "vm_id": 4,  # id прибора учёта
-    "ph": 999,  # адрес под которым счетчик забит в успд
-    "trf": '4',  # количество тарифов у счётчика
+    "ph": 631,  # адрес под которым счетчик забит в успд
+    "trf": '3',  # количество тарифов у счётчика
     "ki": 2,  # коэф тока
     "ku": 3,  # коэф трансформации
-    "ago": 1,  # начало опроса 0 - текущий день 1 вчерашний и тд
-    "cnt": 1,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
+    "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
+    "cnt": 0,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
     "overwrite": 0  # параметр дозаписи/перезаписи
 }
 
 json_string = json.dumps(json_create_cmd)
-r.delete(f'channel.commands')
 
 r.rpush(f'channel.commands', json_string) # добавляем его на редис
 #---
 
+
+# разбор полученного jsonа на данные
 channel_command = r.lpop(f'channel.commands')
 
 address = json.loads(channel_command)["ph"]
 I1 = json.loads(channel_command)["ago"]
 I2 = json.loads(channel_command)["cnt"]
 com = json.loads(channel_command)["cmd"]
+trf = json.loads(channel_command)["trf"]
 
 
-r.delete(f'output')
-answer_key = str(uuid.uuid4())
-json_output = {"key": answer_key, "vmid": 4, "command": "day", "do": "send", "out":create_Packege(address,I1,I2,com),
-               "protocol": "1", "waitingbytes": 28} # генерируем json с запросом и указываем ключ куда положить ответ
 
-json_string = json.dumps(json_output)
-r.rpush('output',json_string) #  добавляем его на редис
 
-#--- создаем пример ответа  #C006770200008006020001A0F5940302100398CEA70204B0050CE0C0
-json_answer = {"in": "C006770200008006020001A0F5940302100398CEA70204B0050CE0C0", "state": "0"}
+for i in range(int(trf)):
+
+    answer_key = str(uuid.uuid4()) # создание ключа
+    json_output = {"key": answer_key, "vmid": 4, "command": "day", "do": "send", "out":create_Packege(address,I1,I2,com,i),
+                   "protocol": "1", "waitingbytes": 28} # генерируем json с запросом и указываем ключ куда положить ответ
+
+    json_string = json.dumps(json_output)
+    r.rpush('output',json_string) #  добавляем его на редис
+
+#--- создаем пример ответа
+#C006770200008006020001D0B98D0102100388CB7404B005CD91C0  накопление энергии на начало суток по первому тарифу
+#C0067702000080060100019AD711020203B1C90E04560CA0C0  текущее накопление энергии
+json_answer = {"in": "C0067702000080060100019AD711020203B1C90E04560CA0C0", "state": "0"}
 json_string = json.dumps(json_answer)
 r.rpush(answer_key,json_string)
 #---
 
 # c переодичностью в секунду проверяем:
-json_answer = r.lpop(answer_key) # там лежит строка
 
-json_data = check_ressive_and(json.loads(json_answer)["in"])
-json_string = json.dumps(json_data)
-r.rpush('data',json_string)
+while True:
+    json_answer = r.lpop(answer_key)
+
+    if json_answer:
+        json_data = check_ressive_and(json.loads(json_answer)["in"])  # разбираем ответ на данные
+        json_string = json.dumps(json_data)
+        r.rpush('data', json_string)  # кладем полученные данные в редис
+        break  # Выход из цикла при получении ответа
+    time.sleep(1)  # Подождать 1 секунду перед следующей итерацией
 
 
 
 
 
+#
+# prim = [0] *  10
+# prim[0] =0xB1
+# prim[1] =0xC9
+# prim[2] =0x0E
+#
+#
+
+# print(DecodeDFF(prim,0))
 
 print(r.lpop('output'))
+print(r.lpop('output'))
+print(r.lpop('output'))
+print(r.lpop('output'))
+
 print(r.lpop('data'))
-
-
-
-#98 CE A7 02
-prim = [0] * 40
-prim[0] = 0x10
-prim[1] = 0
-prim[2] = 0
-prim[3] = 0
-
-
-#print(DecodeDFF(prim,3))
-#print(process_string('c006e703000000060200010001010200010103000101040001018e09c0'))
-
-
-
-
