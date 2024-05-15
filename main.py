@@ -3,6 +3,7 @@ import json
 import uuid
 import datetime
 import time
+import sys
 
 def main():
     #redis-cli
@@ -10,13 +11,10 @@ def main():
     #lrange channel.commands 0 -1
 
     random_uuid = uuid.uuid4() # рандомная генерация ключа
+    command = sys.argv[1:] # получение команды
+    #command = f'channel.commands'
 
-    #30-минутные мощности, по фазам('instant')
-    # тариф в выводе
 
-
-    # коррекция и установка времени
-    # dff зашифровка
 
 
 
@@ -29,7 +27,7 @@ def main():
 
     tBufUART: bytearray = [0] * 40
     int_buf: bytearray = [0] * 40
-    e = 0
+    e = 0 # 0- все ок, 1 - ошибка
 
     def process_string(input_string):  # приведение ответа к формату буфера
         buffer = []
@@ -523,7 +521,7 @@ def main():
 
     json_string = json.dumps(json_create_cmd)
 
-    r.rpush(f'channel.commands', json_string) # добавляем его на редис
+    r.rpush(command, json_string) # добавляем его на редис
     #---
 
 
@@ -564,7 +562,7 @@ def main():
         if json_answer:
             json_data = check_ressive_and(json.loads(json_answer)["in"])  # разбираем ответ на данные
             json_string = json.dumps(json_data)
-            r.rpush('data', json_string)  # кладем полученные данные в редис
+            r.rpush('dbwrite', json_string)  # кладем полученные данные в редис
             break  # Выход из цикла при получении ответа
         time.sleep(1)  # Подождать 1 секунду перед следующей итерацией
 
@@ -576,21 +574,22 @@ def main():
     #1B 0A 08 08
     #D0B98D01
     #9AD711
-    # prim = [0] * 10
-    # prim[0] = 0x11
-    # prim[1] = 0xD7
-    # prim[2] = 0x11
+    prim = [0] * 10
+    prim[0] = 0x3A
+    prim[1] = 0x16
+    prim[2] = 0x13
+    prim[3] = 0x10
+
+    print(DecodeDFF(prim,0))
+
+    # print(r.lpop('output'))
+    # print(r.lpop('output'))
+    # print(r.lpop('output'))
+    # print(r.lpop('output'))
     #
-    # print(DecodeDFF(prim,0))
-
-    print(r.lpop('output'))
-    print(r.lpop('output'))
-    print(r.lpop('output'))
-    print(r.lpop('output'))
-
-    print(r.lpop('data'))
+    #print(r.lpop('dbwrite'))
 
 
     return e
-
 main()
+
