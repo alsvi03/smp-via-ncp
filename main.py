@@ -18,10 +18,10 @@ def main():
 
 
 
-    r = redis.Redis(host='localhost', port=6379, db=0)
-    r.delete(f'output')
-    r.delete(f'data')
-    r.delete(f'channel.commands')
+    r = redis.Redis(host='localhost', port=6379, db=0) #тут поменять на нужный
+    # r.delete(f'output')
+    # r.delete(f'data')
+    # r.delete(f'channel.commands')
 
 
 
@@ -503,26 +503,26 @@ def main():
 
 
 
-    #-- создаем пример запроса
-    json_create_cmd = {
-        "channel": 'ktp6',  # название канала
-        "cmd": 'instant',  # название типа опроса day - показания на начало суток
-        "run": 'ce318',  # название вызываемого протокола
-        "vm_id": 4,  # id прибора учёта
-        "ph": 631,  # адрес под которым счетчик забит в успд
-        "trf": '3',  # количество тарифов у счётчика
-        "ki": 2,  # коэф тока
-        "ku": 3,  # коэф трансформации
-        "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
-        "cnt": 0,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
-        "overwrite": 0  # параметр дозаписи/перезаписи
-    }
-
-
-    json_string = json.dumps(json_create_cmd)
-
-    r.rpush(command, json_string) # добавляем его на редис
-    #---
+    # #-- создаем пример запроса
+    # json_create_cmd = {
+    #     "channel": 'ktp6',  # название канала
+    #     "cmd": 'instant',  # название типа опроса day - показания на начало суток
+    #     "run": 'ce318',  # название вызываемого протокола
+    #     "vm_id": 4,  # id прибора учёта
+    #     "ph": 631,  # адрес под которым счетчик забит в успд
+    #     "trf": '3',  # количество тарифов у счётчика
+    #     "ki": 2,  # коэф тока
+    #     "ku": 3,  # коэф трансформации
+    #     "ago": 0,  # начало опроса 0 - текущий день 1 вчерашний и тд
+    #     "cnt": 0,  # глубина опроса 1 за этот день 2 за этот и предыдущий и тп
+    #     "overwrite": 0  # параметр дозаписи/перезаписи
+    # }
+    #
+    #
+    # json_string = json.dumps(json_create_cmd)
+    #
+    # r.rpush(command, json_string) # добавляем его на редис
+    # #---
 
 
     # разбор полученного jsonа на данные
@@ -546,13 +546,13 @@ def main():
         json_string = json.dumps(json_output)
         r.rpush('output',json_string) #  добавляем его на редис
 
-    #--- создаем пример ответа
-    #C006770200008006020001D0B98D0102100388CB7404B005CD91C0  накопление энергии на начало суток по первому тарифу
-    #C0067702000080060100019AD711020203B1C90E04560CA0C0  текущее накопление энергии
-    json_answer = {"in": "C0067702000080060A000D220C0B0A0E1B0A0808101307070516CE01B901AB0118F32F8530AE2F19D106E105D1061A87278727872752C5029E03BB0253A0099A09A40954B452D751FF515A31C0", "state": "0"}
-    json_string = json.dumps(json_answer)
-    r.rpush(answer_key,json_string)
-    #---
+    # #--- создаем пример ответа
+    # #C006770200008006020001D0B98D0102100388CB7404B005CD91C0  накопление энергии на начало суток по первому тарифу
+    # #C0067702000080060100019AD711020203B1C90E04560CA0C0  текущее накопление энергии
+    # json_answer = {"in": "C0067702000080060A000D220C0B0A0E1B0A0808101307070516CE01B901AB0118F32F8530AE2F19D106E105D1061A87278727872752C5029E03BB0253A0099A09A40954B452D751FF515A31C0", "state": "0"}
+    # json_string = json.dumps(json_answer)
+    # r.rpush(answer_key,json_string)
+    # #---
 
     # c переодичностью в секунду проверяем:
 
@@ -574,13 +574,13 @@ def main():
     #1B 0A 08 08
     #D0B98D01
     #9AD711
-    prim = [0] * 10
-    prim[0] = 0x3A
-    prim[1] = 0x16
-    prim[2] = 0x13
-    prim[3] = 0x10
-
-    print(DecodeDFF(prim,0))
+    # prim = [0] * 10
+    # prim[0] = 0x3A
+    # prim[1] = 0x16
+    # prim[2] = 0x13
+    # prim[3] = 0x10
+    #
+    # print(DecodeDFF(prim,0))
 
     # print(r.lpop('output'))
     # print(r.lpop('output'))
