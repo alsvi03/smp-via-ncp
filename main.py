@@ -289,15 +289,19 @@ def main():
         return 14
 
     def min30(buff):
-        #C0 06 77 02 00 00 80 06 01 00       12 00 13 14 15      BF 71 C0
-        buff[8] = 0x01  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
+        # C0 06 77 02 00 00 80 06 01 00       12 00 13 14 15      BF 71 C0
+        buff[8] = 0x0A  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
         buff[9] = 0x00  # подкоманда
-        buff[10] = 0x12  #  A+
-        buff[11] = 0x13  #  A-
-        buff[12] = 0x14  #  R+
-        buff[13] = 0x15  #  R-
+        buff[10] = 0x12  # A+
+        buff[11] = 0x02
+        buff[12] = 0x13  # A-
+        buff[13] = 0x02
+        buff[14] = 0x14  # R+
+        buff[15] = 0x02
+        buff[16] = 0x15  # R-
+        buff[17] = 0x02
 
-        return 14
+        return 18
 
     def instant(buff):
         # 0A 00 0D  22 0C 0B 0A  0E  1B 0A 08 08   10  13 07 07 05   16   CE 01 B9 01 AB 01   18  F3 2F 85 30 AE 2F
@@ -375,6 +379,16 @@ def main():
                                  "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
 
                 elif buff[8] == 0x01:
+                    json_data = {"ep": check_Data(buff, 0)[0],
+                                 "em": check_Data(buff, 0)[1],
+                                 "rp": check_Data(buff, 0)[2],
+                                 "rm": check_Data(buff, 0)[3],
+                                 "tarif": 0,
+                                 "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                                 "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                                 "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
+                elif buff[8] == 0x0A:
                     json_data = {"ep": check_Data(buff, 0)[0],
                                  "em": check_Data(buff, 0)[1],
                                  "rp": check_Data(buff, 0)[2],
