@@ -289,6 +289,7 @@ def main():
         return 14
 
     def min30(buff):
+
         # C0 06 77 02 00 00 80 06 01 00       12 00 13 14 15      BF 71 C0
         buff[8] = 0x0A  # номер команды (01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
         buff[9] = 0x00  # подкоманда
@@ -336,33 +337,23 @@ def main():
         if ncp_checkCRC(buff, len(buff)):  # проверка целостности пакета
             if buff[7] == 0x07:  # обработка ошибки
                 if buff[8] == 1:
-                    json_data = {
-                        "error": "Error. Used if the codes do not contain an error that is adequate in meaning."}
-                    print("Error. Used if the codes do not contain an error that is adequate in meaning.")
+                    print("Ошибка. Используется если в кодах нет адекватной по смыслу ошибки.")
                 elif buff[8] == 2:
-                    json_data = {"error": "Parameter error"}
-                    print("Parameter error")
+                    print("Ошибка параметров")
                 elif buff[8] == 3:
-                    json_data = {"error": "Unknown/unsupported code"}
-                    print("Unknown/unsupported code")
+                    print("Неизвестный/пеподдерживаемый код")
                 elif buff[8] == 4:
-                    json_data = {"error": "Write error"}
-                    print("Write error")
+                    print("Ошибка записи")
                 elif buff[8] == 5:
-                    json_data = {"error": "Not enough memory"}
-                    print("Not enough memory")
+                    print("Недостаточно памяти")
                 elif buff[8] == 6:
-                    json_data = {"error": "Wrong address"}
-                    print("Wrong address")
+                    print("Неверный адрес")
                 elif buff[8] == 7:
-                    json_data = {"error": "Incorrect data in the command"}
-                    print("Incorrect data in the command")
+                    print("Некоректные данные в команде")
                 elif buff[8] == 8:
-                    json_data = {"error": "Another command is in progress or the device is busy"}
-                    print("Another command is in progress or the device is busy")
+                    print("Выполняется другая команда или устройство занято")
                 elif buff[8] == 9:
-                    json_data = {"error": "No connection"}
-                    print("No connection")
+                    print("Нет связи")
                 e = 1
             elif buff[7] == 0x06:
                 if buff[8] == 0x02:  #(01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
@@ -424,8 +415,7 @@ def main():
 
 
         else:
-            json_data = {"error": 'Packet checksum does not match'}
-            print("Packet checksum does not match")
+            print("Контрольная сумма пакета не совпадает")
             e = 1
         return json_data
 
@@ -501,10 +491,12 @@ def main():
             additional_data_json = json.dumps(additional_data)
 
             # объединяем два json объекта
+            # json_string = json.dumps(json_data)
+            # json_string.update(json.loads(additional_data_json))
             json_string = json.dumps(json_data)
-            json_string.update(json.loads(additional_data_json))
-
-
+            json_dict = json.loads(json_string)
+            json_dict.update(json.loads(additional_data_json))
+            json_string = json.dumps(json_dict)
 
             r.rpush('dbwrite', json_string)  # кладем полученные данные в редис
             break  # Выход из цикла при получении ответа
