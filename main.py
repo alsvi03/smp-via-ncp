@@ -305,33 +305,24 @@ def main():
         return 18
 
     def instant(buff):
-        # 0A 00 0D  22 0C 0B 0A  0E  1B 0A 08 08   10  13 07 07 05   16   CE 01 B9 01 AB 01   18  F3 2F 85 30 AE 2F
-        # 19  D1 06 E1 05 D1 06  1A  87 27 87 27 87 27   52  C5 02 9E 03 BB 02   53  A0 09 9A 09 A4 09  54 B4 52 D7 51 FF 51
+        # C0 06 77 02 00 00 00 06    0A 00 0E 1E 10 1E 16 1C 18 1C 19 1C 1A 1C    9E 89 C0
         buff[8] = 0x0a  # номер команды 0a - DATA_SINGLE_EX
         buff[9] = 0x00  # подкоманда
-        buff[10] = 0x0d
+        buff[10] = 0x0e
         buff[11] = 0x1e
-        buff[12] = 0x0e
+        buff[12] = 0x10
         buff[13] = 0x1e
-        buff[14] = 0x10
-        buff[15] = 0x1e
-        buff[16] = 0x16
+        buff[14] = 0x16
+        buff[15] = 0x1c
+        buff[16] = 0x18
         buff[17] = 0x1c
-        buff[18] = 0x18
+        buff[18] = 0x19
         buff[19] = 0x1c
-        buff[20] = 0x19
+        buff[20] = 0x1a
         buff[21] = 0x1c
-        buff[22] = 0x1a
-        buff[23] = 0x1c
-        buff[24] = 0x52
-        buff[25] = 0x1c
-        buff[26] = 0x53
-        buff[27] = 0x1c
-        buff[28] = 0x54
-        buff[29] = 0x1c
-        return 30
+        return 22
 
-    def check_ressive_and(answer):
+    def check_ressive_and(answer,trf,g):
         global e
         buff = hex_to_int(byte_destuffing(process_string(answer)))  # обратный байт стаффинг и приведение к int
         if ncp_checkCRC(buff, len(buff)):  # проверка целостности пакета
@@ -357,62 +348,80 @@ def main():
                 e = 1
             elif buff[7] == 0x06:
                 if buff[8] == 0x02:  #(01- DATA_SINGLE  02-GET_DATA_MULTIPLE)
-                    # запись данных в json
-                    json_data = {
-                                 "ep": check_Data(buff, 3)[0],
-                                 "em": check_Data(buff, 3)[1],
-                                 "rp": check_Data(buff, 3)[2],
-                                 "rm": check_Data(buff, 3)[3],
-                                 "tarif": 0,
-                                 "date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                                 "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                                 "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
+                    if buff[10] == 0x01 or buff[10] == 0x05:  # начало суток
+                        # запись данных в json
+                        json_data = {"ep": check_Data(buff, 3)[0],
+                                     "em": check_Data(buff, 3)[1],
+                                     "rp": check_Data(buff, 3)[2],
+                                     "rm": check_Data(buff, 3)[3],
+                                     "tarif": trf,
+                                     "date": (datetime.datetime.now() - datetime.timedelta(days=g)).strftime("%Y-%m-%d"),
+                                     "time": "00:00:00",
+                                     "poll_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                                     "poll_time": datetime.datetime.now().strftime("%H:%M:%S"),
+                                     }
+
+                    elif buff[10] == 0x09 or buff[10] == 0x0d:  # Начало месяца
+                        json_data = {"ep": check_Data(buff, 3)[0],
+                                     "em": check_Data(buff, 3)[1],
+                                     "rp": check_Data(buff, 3)[2],
+                                     "rm": check_Data(buff, 3)[3],
+                                     "tarif": trf,
+                                     "date": (datetime.datetime.now() - timedelta(days=g*30)).replace(day=1).strftime("%Y-%m-%d"),
+                                     "time": "00:00:00",
+                                     "poll_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                                     "poll_time": datetime.datetime.now().strftime("%H:%M:%S"), }
 
                 elif buff[8] == 0x01:
                     json_data = {"ep": check_Data(buff, 0)[0],
                                  "em": check_Data(buff, 0)[1],
                                  "rp": check_Data(buff, 0)[2],
                                  "rm": check_Data(buff, 0)[3],
-                                 "tarif": 0,
-                                 "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                                 "tarif": trf,
+                                 "date": (datetime.datetime.now() - datetime.timedelta(days=g)).strftime("%Y-%m-%d"),
                                  "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                                 "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
+                                 "poll_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S"),
+                                 }
+
+
+                elif buff[10] == 0x0E:
+                    json_data = {
+                        "power_active": check_instant(buff)[0],
+                        "power_active_phase_a": check_instant(buff)[1],
+                        "power_active_phase_b": check_instant(buff)[2],
+                        "power_active_phase_c": check_instant(buff)[3],
+                        "power_reactive": check_instant(buff)[4],
+                        "power_reactive_phase_a": check_instant(buff)[5],
+                        "power_reactive_phase_b": check_instant(buff)[6],
+                        "power_reactive_phase_c": check_instant(buff)[7],
+                        "amperage_phase_a": check_instant(buff)[8],
+                        "amperage_phase_b": check_instant(buff)[9],
+                        "amperage_phase_c": check_instant(buff)[10],
+                        "voltage": check_instant(buff)[11],
+                        "voltage_phase_a": check_instant(buff)[12],
+                        "voltage_phase_b": check_instant(buff)[13],
+                        "voltage_phase_c": check_instant(buff)[14],
+                        "power_coeff_plase_a": check_instant(buff)[15],
+                        "power_coeff_plase_b": check_instant(buff)[16],
+                        "power_coeff_plase_c": check_instant(buff)[17],
+                        "frequency": check_instant(buff)[18],
+                        "date": (datetime.datetime.now() - datetime.timedelta(days=g)).strftime("%Y-%m-%d"),
+                        "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                        "poll_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                        "poll_time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    }
                 elif buff[8] == 0x0A:
                     json_data = {"ep": check_Data(buff, 0)[0],
                                  "em": check_Data(buff, 0)[1],
                                  "rp": check_Data(buff, 0)[2],
                                  "rm": check_Data(buff, 0)[3],
-                                 "tarif": 0,
-                                 "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+                                 "tarif": trf,
+                                 "date": (datetime.datetime.now() - datetime.timedelta(days=g)).strftime("%Y-%m-%d"),
                                  "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                                 "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
-                elif buff[10] == 0x0d:
-                    json_data = {
-
-                        "p": check_instant(buff)[0],
-                        "ep": check_instant(buff)[1],
-                        "rp": check_instant(buff)[2],
-                        "t": check_instant(buff)[3],
-                        "v": check_instant(buff)[4],
-                        "kp": check_instant(buff)[5],
-                        "vn": check_instant(buff)[6],
-                        "atv": check_instant(buff)[7],
-                        "af": check_instant(buff)[8],
-                        "lv": check_instant(buff)[9],
-                        "tarif": 0,
-                        "date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                        "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                        "poll_date": datetime.datetime.now().strftime("%d-%m-%Y"),
-                        "poll_time": datetime.datetime.now().strftime("%H:%M:%S")}
-
-
-
-
-
-
+                                 "poll_date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                                 "poll_time": datetime.datetime.now().strftime("%H:%M:%S"),
+                                 }
 
         else:
             print("Контрольная сумма пакета не совпадает")
@@ -420,38 +429,62 @@ def main():
         return json_data
 
     def check_Data(buff, shiftBits):
-        ep = DecodeDFF(buff[11:40], shiftBits)[0]  # A+
+        ep = (DecodeDFF(buff[11:40], shiftBits)[0])/10000  # A+
+        print("ep: ", ep)
         i = DecodeDFF(buff[11:40], shiftBits)[1] + 1
-        em = DecodeDFF(buff[11 + i:40], shiftBits)[0]  # A-
+        em = (DecodeDFF(buff[11 + i:40], shiftBits)[0])/10000  # A-
+        print("em: ", em)
         i = DecodeDFF(buff[11 + i:40], shiftBits)[1] + 1 + i
-        rp = DecodeDFF(buff[11 + i:40], shiftBits)[0]  # R+
+        rp = (DecodeDFF(buff[11 + i:40], shiftBits)[0])/10000  # R+
+        print("rp: " ,rp)
         i = DecodeDFF(buff[11 + i:40], shiftBits)[1] + 1 + i
-        rm = DecodeDFF(buff[11 + i:40], shiftBits)[0]  # R-
-
+        rm = (DecodeDFF(buff[11 + i:40], shiftBits)[0])/10000  # R-
+        print("rm: " ,rm)
         return ep, em, rp, rm
 
     def check_instant(buff):
-        fp = DecodeDFF(buff[11:40], 3)[0]  # полная мощность
-        i = DecodeDFF(buff[11:40], 3)[1] + 1
-        ep = DecodeDFF(buff[11 + i:40], 3)[0]  # Активная мощность
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        rp = DecodeDFF(buff[11 + i:40], 3)[0]  # Реактивная мощность
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        t = DecodeDFF(buff[11 + i:40], 3)[0]  # Ток
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        v = DecodeDFF(buff[11 + i:40], 3)[0]  # Напряжение
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        kp = DecodeDFF(buff[11 + i:40], 3)[0]  # Коэффициент мощность
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        vn = DecodeDFF(buff[11 + i:40], 3)[0]  # частота сети
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        atv = DecodeDFF(buff[11 + i:40], 3)[0]  # угол между током и напряжением
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        af = DecodeDFF(buff[11 + i:40], 3)[0]  # Угол между фазами (AB, BC, AC)
-        i = DecodeDFF(buff[11 + i:40], 3)[1] + 1 + i
-        lv = DecodeDFF(buff[11 + i:40], 3)[0]  # Линейные напряжения (AB, BC, AC)
 
-        return fp, ep, rp, t, v, kp, vn, atv, af, lv
+        power_active = (DecodeDFF(buff[11:55], 3)[0]/10000) #0e
+        i = DecodeDFF(buff[11:55], 3)[1]
+        power_active_phase_a = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1]  + i
+        power_active_phase_b = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + i
+        power_active_phase_c =( DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+        power_reactive = (DecodeDFF(buff[11 + i:55], 3)[0] )/10000 #10
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        power_reactive_phase_a = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        power_reactive_phase_b = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        power_reactive_phase_c = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+        amperage_phase_a =( DecodeDFF(buff[11 + i:55], 3)[0])/10000 #16
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        amperage_phase_b = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        amperage_phase_c = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+        voltage = (DecodeDFF(buff[11 + i:55], 3)[0])/10000  #18
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        voltage_phase_a = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        voltage_phase_b = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        voltage_phase_c = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+        power_coeff_plase_a = (DecodeDFF(buff[11 + i:55], 3)[0])/10000 #19
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        power_coeff_plase_b = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] +  i
+        power_coeff_plase_c = (DecodeDFF(buff[11 + i:55], 3)[0])/10000
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+        frequency = (DecodeDFF(buff[11 + i:55], 3)[0])/10000 #1a
+        i = DecodeDFF(buff[11 + i:55], 3)[1] + 1 + i
+
+        return power_active,power_active_phase_a,power_active_phase_b,power_active_phase_c,power_reactive,power_reactive_phase_a,power_reactive_phase_b,power_reactive_phase_c,amperage_phase_a,amperage_phase_b,amperage_phase_c,voltage,voltage_phase_a,voltage_phase_b,voltage_phase_c,power_coeff_plase_a,power_coeff_plase_b,power_coeff_plase_c,frequency
+
 
     channel_command = r.lpop(f'{command[0]}.commands')
     print(f'{command[0]}.commands')
@@ -460,47 +493,45 @@ def main():
     I1 = json.loads(channel_command)["ago"]
     I2 = json.loads(channel_command)["cnt"]
     com = json.loads(channel_command)["cmd"]
-    trf = json.loads(channel_command)["trf"]
+    trf = int(json.loads(channel_command)["trf"])+1
     vm_id = json.loads(channel_command)["vm_id"]
     overwrite = json.loads(channel_command)["overwrite"]
-    for i in range(int(trf)):
-        answer_key = str(uuid.uuid4())  # создание ключа
-        json_output = {"key": answer_key, "vmid": vm_id, "command": com, "do": "send",
-                       "out": create_Packege(address, I1, I2, com, i),
-                       "protocol": "1",
-                       "waitingbytes": 28}
+    for g in range(I2):
+        if com == 'instant':
+            trf = 2
 
-        json_string = json.dumps(json_output)
-        r.rpush(f'{command[0]}.output', json_string)  #  добавляем его на редис
+        for i in range(trf-1):
+            answer_key = str(uuid.uuid4())  # создание ключа
 
-    while True:
-        json_answer = r.get(answer_key)
+            json_output = {"key": answer_key, "vmid": vm_id, "command": com, "do": "send",
+                           "out": create_Packege(address, g, 0, com, pow(2,i)),
+                           "protocol": "1",
+                           "waitingbytes": 28}
+            print(json_output)
+            json_string = json.dumps(json_output)
+            r.rpush(f'{command[0]}.output', json_string)  #  добавляем его на редис
 
-        if json_answer:
-            json_data = check_ressive_and(json.loads(json_answer)["in"])  # разбираем ответ на данные
+            while True:
 
-            # данные для дозаписи
-            additional_data = {
-                "command":com,
-                "vm_id":vm_id,
-                "ago":I1,
-                "overwrite": overwrite,
-            }
+                json_answer = r.get(answer_key)
+                if json_answer:
+                    print(json_answer)
+                    print(json.loads(json_answer)["in"])
+                    json_data = check_ressive_and(json.loads(json_answer)["in"],i,g)  # разбираем ответ на данные
+                    # данные для дозаписи
+                    additional_data = {
+                        "command": com,
+                        "vm_id": vm_id,
+                        "ago": I1,
+                        "overwrite": overwrite,
+                        "data": json_data,
+                    }
 
-            # преобразуем дополнительные данные в формат json
-            additional_data_json = json.dumps(additional_data)
+                    json_string = json.dumps(additional_data)
+                    r.rpush('dbwrite', json_string)  # кладем полученные данные в редис
+                    print(f'JSON:{json_string}')
+                    break  # Выход из цикла при получении ответа
 
-            # объединяем два json объекта
-            # json_string = json.dumps(json_data)
-            # json_string.update(json.loads(additional_data_json))
-            json_string = json.dumps(json_data)
-            json_dict = json.loads(json_string)
-            json_dict.update(json.loads(additional_data_json))
-            json_string = json.dumps(json_dict)
-
-            r.rpush('dbwrite', json_string)  # кладем полученные данные в редис
-            break  # Выход из цикла при получении ответа
-        time.sleep(1)  # Подождать 1 секунду перед следующей итерацией
 
     return e
 
